@@ -14,7 +14,12 @@ const auth = require('./middleware/auth');
 const ObjectID = require('mongodb').ObjectID;
 const cookieParser = require('cookie-parser');
 app.use(express.json());
-app.use(cors());
+var corsOptions = {
+  origin: 'http://127.0.0.1:3001',
+  credentials: true
+  // optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
+}
+app.use(cors(corsOptions));
 app.use(cookieParser());
 let db;
 client.connect(url, connectionOptions, (err, database) => {
@@ -44,7 +49,13 @@ app.post('/signup', async (req, res) => {
 
   // TODO: Hash the pwd.
   const ret = await db.collection(collectionName).insertOne(newUser);
-  console.log('ret register: ', ret);
+  console.log('ret ops ', ret.ops);
+  var userId = ret.ops[0]._id;
+  var noteId = createNotes(userId);
+  console.log('note id after the user created: ', noteId);
+  // Start a note document for the user with an empty note array.
+  // createNotes()
+  // console.log('ret register: ', ret);
   if (ret.result.n === 1 && ret.result.ok === 1) {
     return res.status(201)
         .json({message: `${ret.insertedCount} User created.`});
@@ -55,6 +66,7 @@ app.post('/signup', async (req, res) => {
 app.post('/login', async (req, res) => {
   const username = req.body.userName;
   const pwd = req.body.password;
+  console.log('login: ', username, pwd);
   let user =
     await db.collection(collectionName).findOne({userName: username});
   // TODO: Add here pwd validator ( also add to front end ).
@@ -65,6 +77,7 @@ app.post('/login', async (req, res) => {
     return res.status(400).json({message: 'Login credentials are wrong!'});
   }
   const {token, tokenClient} = await getToken(user._id);
+  console.log('token in login: ', token);
   user = await db.collection(collectionName)
       .findOneAndUpdate(
           {_id: new ObjectID(user._id)},
@@ -84,6 +97,7 @@ app.post('/login', async (req, res) => {
         maxAge: 60 * 60 * 1000,
         httpOnly: false,
       });
+
   return res.status(200).json({success: 'Succesfully Logged In', user});
 });
 
@@ -101,10 +115,34 @@ app.post('/logout', auth, async(req, res) => {
 
 // Notes
 app.get('/notes', auth, async (req, res) => {
+  console.log('get all notes');
   const userId = req.user;
   const notes = await db.collection('Notes')
       .find({userId: new ObjectID(userId)}).toArray();
+  console.log('Notes in getAllNotes: ', notes);
   return res.status(200).json({message: 'Notes successfull', notes});
+});
+
+// Add notes
+app.post('/addNote', auth, async(req, res) => {
+  const userId = req.user;
+  console.log('user id in add note: ', userId);
+  const {type, title, note, coord, zIndex } = req.body; 
+  console.log('title in add note: ', title);
+  const newNote = await db.collection('Notes')
+    .findOneAndUpdate(
+      {userId: new ObjectID(userId)},
+      {
+        $push: { notes: { _id: new ObjectID(), type, title, note, coord, zIndex}, }
+      },
+      {returnOriginal: false},
+      )
+  res.status(200).json({message: 'Note successully saved'});
+});
+
+app.put('/note', auth, (req, res) => {
+  const userId = req.user;
+
 });
 
 const getHashed = async (pwd) => {
@@ -146,6 +184,13 @@ const verifyToken = async (token, isClient = false) => {
   }
   return verified;
 };
+
+
+const createNotes = async (userId) => {
+  let note = await db.collection('Notes').insertOne({_id: new ObjectID(), userId: new ObjectID(userId), notes:[{_id: new ObjectID(), type: 'Add Type', title: 'Add Title', note: 'Add Note', coord: {x: 0, y:0} }]});
+  console.log('note in createNotes: ', note);
+  return note.ops[0]._id;
+}
 
 // const tok = getToken().then( res => {
 //     verifyToken(res).then(tok => console.log('out token: ', tok));
